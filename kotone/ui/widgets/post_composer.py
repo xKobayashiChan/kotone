@@ -52,7 +52,7 @@ class PostComposer(QWidget):
         self._media_picker = MediaPicker()
 
         self._status_label = QLabel("")
-        # TODO: VC(音声通話)機能は未完成のため無効化中。実装を完了させたら有効化する。
+        # TODO(#1): VC(音声通話)機能は未完成のため無効化中。実装を完了させたら有効化する。
         self._call_button = QPushButton("\U0001F4DE 通話を始める")
         self._call_button.clicked.connect(self._on_call_clicked)
         self._call_button.setEnabled(False)

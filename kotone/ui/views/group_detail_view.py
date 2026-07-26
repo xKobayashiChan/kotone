@@ -50,7 +50,7 @@ class GroupDetailView(QWidget):
         self._update_join_button_text()
         self._join_button.clicked.connect(self._on_join_leave_clicked)
 
-        # TODO: VC(音声通話)機能は未完成のため無効化中。実装を完了させたら有効化する。
+        # TODO(#1): VC(音声通話)機能は未完成のため無効化中。実装を完了させたら有効化する。
         self._vc_button = QPushButton("VC")
         self._vc_button.clicked.connect(self._on_vc_clicked)
         self._vc_button.setEnabled(False)

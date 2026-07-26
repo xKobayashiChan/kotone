@@ -153,7 +153,7 @@ class PostCard(QFrame):
         text_col.addWidget(QLabel(status_text))
         row.addLayout(text_col, 1)
 
-        # TODO: VC(音声通話)機能は未完成のため無効化中。実装を完了させたら有効化する。
+        # TODO(#1): VC(音声通話)機能は未完成のため無効化中。実装を完了させたら有効化する。
         join_button = QPushButton("参加する")
         join_button.setProperty("primary", True)
         join_button.setEnabled(False)
