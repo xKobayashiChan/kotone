@@ -7,6 +7,7 @@ get_conversation、投稿はcreate_post(in_reply_to=...)で行う。
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -36,6 +37,8 @@ from kotone.ui.call.call_dialog import CallDialog
 from kotone.ui.widgets.clickable_label import ClickableLabel
 from kotone.ui.widgets.image_loader import load_pixmap, load_square_icon
 from kotone.ui.widgets.user_profile_opener import open_user_profile
+
+logger = logging.getLogger(__name__)
 
 _AVATAR_SIZE = 40
 _MEDIA_MAX_WIDTH = 420
@@ -171,8 +174,9 @@ class PostCard(QFrame):
         try:
             response = await client.get_conference_call(call_id=call.id)
         except Exception:  # noqa: BLE001
+            logger.exception("get_conference_call failed for call_id=%s", call.id)
             return
-        print("DEBUG get_conference_call raw response:", response.model_dump())
+        logger.debug("get_conference_call response: %r", response.model_dump())
         if response.conference_call is None:
             return
         group_name = self._post.group.topic if self._post.group else "通話"

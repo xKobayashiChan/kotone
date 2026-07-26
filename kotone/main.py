@@ -27,6 +27,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
 
 from kotone.core.client_manager import ClientManager, LoginResult
+from kotone.core.logging_config import setup_logging
 from kotone.core.notification_poller import NotificationPoller
 from kotone.core.resources import resource_dir
 from kotone.core.settings import AppSettings
@@ -126,6 +127,7 @@ class _AppController:
 
 
 def run() -> None:
+    setup_logging()
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(str(_ICON_PATH)))
     loop = qasync.QEventLoop(app)
