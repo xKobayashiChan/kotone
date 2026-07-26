@@ -1,3 +1,5 @@
+<div align="center">
+
 # Kotone
 
 <img src="kotone.jpg" alt="Kotone" width="120" />
@@ -8,6 +10,10 @@
 ![Status](https://img.shields.io/badge/status-unofficial-orange)
 
 Yay! の非公式デスクトップクライアント（[yaylib](https://github.com/qvco/yaylib) 利用、PySide6 製）。
+
+</div>
+
+---
 
 ## セットアップ
 
