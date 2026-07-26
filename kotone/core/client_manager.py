@@ -9,6 +9,7 @@ FileSessionStoreにより %APPDATA%\\Kotone\\session.json へ自動永続化
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -16,6 +17,8 @@ from typing import Optional
 import yaylib
 from yaylib.session import NoSessionError
 from yaylib.session_file import new_session_store
+
+logger = logging.getLogger(__name__)
 
 
 def _session_file_path() -> str:
@@ -57,16 +60,24 @@ class ClientManager:
         try:
             await client.load_session(email)
         except NoSessionError:
+            logger.info("no cached session for %s", email)
             return None
         try:
             await client.get_fresh_user(id=client.user_id)
         except Exception:
+            logger.exception("cached session for %s is invalid/expired", email)
             return None
+        logger.info("restored session for %s", email)
         return LoginResult(user_id=client.user_id, email=email)
 
     async def login(self, email: str, password: str) -> LoginResult:
         client = await self._ensure_client()
-        await client.login_with_email(email=email, password=password)
+        try:
+            await client.login_with_email(email=email, password=password)
+        except Exception:
+            logger.exception("login failed for %s", email)
+            raise
+        logger.info("logged in as %s", email)
         return LoginResult(user_id=client.user_id, email=email)
 
     async def logout(self, email: str) -> None:
@@ -78,14 +89,15 @@ class ClientManager:
         try:
             await self.client.logout()
         except Exception:
-            pass
+            logger.exception("server-side logout failed for %s", email)
         if self.client.session_store is not None and email:
             try:
                 await self.client.session_store.delete(email)
             except Exception:
-                pass
+                logger.exception("failed to delete cached session for %s", email)
         await self.client.close()
         self.client = None
+        logger.info("logged out %s", email)
 
     async def close(self) -> None:
         if self.client is not None:
