@@ -49,6 +49,19 @@ python -m kotone.main
 自動テストは未整備です。変更を確認する際は上記コマンドでアプリを実際に起動し、
 ログイン・タイムライン表示・チャットなど触る機能に応じて手動で確認してください。
 
+## ログ
+
+`%APPDATA%\Kotone\logs\kotone.log` にログを出力します（ローテーション付き、
+最大1MB×3世代）。ソースから起動している場合はコンソールにも同じ内容が出ます。
+未処理の例外も`sys.excepthook`経由でここに記録されるため、exe版（コンソール
+非表示）で問題が起きた場合もこのファイルを確認してください。
+
+ログレベルは環境変数 `KOTONE_LOG_LEVEL`（既定 `INFO`）で変更できます:
+
+```powershell
+$env:KOTONE_LOG_LEVEL = "DEBUG"
+```
+
 ## exe ビルド
 
 [PyInstaller](https://pyinstaller.org/) を使い、単一 exe（`Kotone.spec` 定義）としてビルドします。
