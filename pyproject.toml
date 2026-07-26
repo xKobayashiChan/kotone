@@ -1,0 +1,20 @@
+[project]
+name = "kotone"
+version = "0.1.0"
+description = "Yay! の非公式デスクトップクライアント (yaylib利用)"
+requires-python = ">=3.10"
+dependencies = [
+    "yaylib>=2.3.0",
+    "PySide6>=6.6",
+    "qasync>=0.27",
+]
+
+[project.scripts]
+kotone = "kotone.main:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["kotone*"]

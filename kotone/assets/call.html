@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+<script>
+(function () {
+  "use strict";
+
+  // file://で開いているため<script src="https://...">タグは実行されない
+  // (fetch()自体は通る)。SDK本体はfetchで取得してから動的にscriptタグへ
+  // 挿入して実行する。
+  var AGORA_SDK_URL = "https://cdn.jsdelivr.net/npm/agora-rtc-sdk-ng@4.23.3/AgoraRTC_N-production.js";
+
+  var bridge = null;
+  var client = null;
+  var localAudioTrack = null;
+  var sdkPromise = null;
+
+  function loadSdk() {
+    if (!sdkPromise) {
+      sdkPromise = fetch(AGORA_SDK_URL)
+        .then(function (res) { return res.text(); })
+        .then(function (code) {
+          var script = document.createElement("script");
+          script.textContent = code;
+          document.head.appendChild(script);
+          if (typeof AgoraRTC === "undefined") {
+            throw new Error("AgoraRTC did not define itself after loading");
+          }
+        });
+    }
+    return sdkPromise;
+  }
+
+  function setupClient() {
+    if (client) return;
+    client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+
+    client.on("user-joined", function (user) {
+      if (bridge) bridge.on_user_joined(String(user.uid));
+    });
+    client.on("user-left", function (user) {
+      if (bridge) bridge.on_user_left(String(user.uid));
+    });
+    client.on("user-published", function (user, mediaType) {
+      client.subscribe(user, mediaType).then(function () {
+        if (mediaType === "audio" && user.audioTrack) {
+          user.audioTrack.play();
+        }
+      }).catch(function (err) {
+        if (bridge) bridge.on_error("subscribe failed: " + err);
+      });
+    });
+    client.on("connection-state-change", function (curState, revState, reason) {
+      if (bridge) bridge.on_connection_state_change(String(curState), String(reason || ""));
+    });
+  }
+
+  window.callApi = {
+    join: function (appId, channel, token, uid) {
+      loadSdk().then(function () {
+        setupClient();
+        return AgoraRTC.createMicrophoneAudioTrack();
+      }).then(function (track) {
+        localAudioTrack = track;
+        return client.join(appId, channel, token || null, uid);
+      }).then(function () {
+        return client.publish([localAudioTrack]);
+      }).then(function () {
+        if (bridge) bridge.on_joined(String(uid));
+      }).catch(function (err) {
+        if (bridge) {
+          bridge.on_error(
+            "join failed: " + err +
+            " | channel=" + JSON.stringify(channel) + " (" + (channel || "").length + " chars)" +
+            " uid=" + JSON.stringify(uid) +
+            " tokenLen=" + (token ? token.length : 0)
+          );
+        }
+      });
+    },
+    leave: function () {
+      if (localAudioTrack) {
+        localAudioTrack.stop();
+        localAudioTrack.close();
+        localAudioTrack = null;
+      }
+      if (client) {
+        client.leave().catch(function () {});
+      }
+    },
+    setMuted: function (muted) {
+      if (localAudioTrack) {
+        localAudioTrack.setMuted(!!muted);
+      }
+    }
+  };
+
+  new QWebChannel(qt.webChannelTransport, function (channel) {
+    bridge = channel.objects.bridge;
+    loadSdk().then(function () {
+      setupClient();
+      bridge.on_ready();
+    }).catch(function (err) {
+      bridge.on_error("SDK load failed: " + err);
+    });
+  });
+})();
+</script>
+</body>
+</html>
