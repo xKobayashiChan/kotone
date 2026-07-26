@@ -68,3 +68,7 @@ pyinstaller Kotone.spec
   リクエスト内容（ファイル名・拡張子・署名）は正規実装と一致しており、
   原因はYay!サーバー側の非同期モデレーション処理と推測されるが未解決（TODO）。
 
+## 開発フロー
+
+ブランチ運用・PRの出し方は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+
