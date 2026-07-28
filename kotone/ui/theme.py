@@ -1,18 +1,34 @@
 """アプリ全体の配色・余白・角丸を統一するテーマ。QApplicationに一括で
 スタイルシートを適用する方式で、ライト/ダークをいつでも切り替えられる
 ようにする。
+
+アクセントカラー（差し色）はライト/ダークの配色そのものとは独立に、
+設定画面からユーザーが自由に変更できる（kotone.ui.views.settings_dialog
+参照）。accent_textはアクセントカラーの明度から自動計算するため、
+黄色のような明るい色を選んでも文字が読めなくなることはない。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Tuple
 
 from PySide6.QtWidgets import QApplication
 
 THEME_DARK = "dark"
 THEME_LIGHT = "light"
 DEFAULT_THEME = THEME_DARK
+
+# (表示名, 16進カラーコード)。設定画面のプリセットスウォッチと同じ並びを使う。
+ACCENT_PRESETS: Tuple[Tuple[str, str], ...] = (
+    ("イエロー", "#ffcc33"),
+    ("レッド", "#ff3d78"),
+    ("オレンジ", "#ff9f0a"),
+    ("グリーン", "#34c759"),
+    ("ブルー", "#0a84ff"),
+    ("パープル", "#af52de"),
+)
+DEFAULT_ACCENT = ACCENT_PRESETS[0][1]
 
 
 @dataclass(frozen=True)
@@ -23,8 +39,6 @@ class _Palette:
     border: str
     text: str
     text_muted: str
-    accent: str
-    accent_text: str
 
 
 _DARK = _Palette(
@@ -34,8 +48,6 @@ _DARK = _Palette(
     border="#38383e",
     text="#eaeaec",
     text_muted="#9a9aa1",
-    accent="#ff3d78",
-    accent_text="#ffffff",
 )
 
 _LIGHT = _Palette(
@@ -45,14 +57,22 @@ _LIGHT = _Palette(
     border="#dcdce1",
     text="#1c1c1e",
     text_muted="#6e6e76",
-    accent="#ff3d78",
-    accent_text="#ffffff",
 )
 
 _PALETTES: Dict[str, _Palette] = {THEME_DARK: _DARK, THEME_LIGHT: _LIGHT}
 
 
-def _build_stylesheet(p: _Palette) -> str:
+def _accent_text_color(accent_hex: str) -> str:
+    """アクセントカラーの上に置く文字色を、背景の明度から自動選択する。
+    黄色などの明るい色に白文字だと読めなくなるため。"""
+    value = accent_hex.lstrip("#")
+    r, g, b = (int(value[i : i + 2], 16) for i in (0, 2, 4))
+    luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    return "#1c1c1e" if luma > 0.6 else "#ffffff"
+
+
+def _build_stylesheet(p: _Palette, accent: str) -> str:
+    accent_text = _accent_text_color(accent)
     return f"""
     QWidget {{
         background-color: {p.bg};
@@ -89,11 +109,11 @@ def _build_stylesheet(p: _Palette) -> str:
         border-radius: 8px;
         padding: 6px 8px;
         color: {p.text};
-        selection-background-color: {p.accent};
+        selection-background-color: {accent};
     }}
 
     QLineEdit:focus, QTextEdit:focus {{
-        border: 1px solid {p.accent};
+        border: 1px solid {accent};
     }}
 
     QPushButton {{
@@ -105,7 +125,7 @@ def _build_stylesheet(p: _Palette) -> str:
     }}
 
     QPushButton:hover {{
-        border: 1px solid {p.accent};
+        border: 1px solid {accent};
     }}
 
     QPushButton:pressed {{
@@ -117,14 +137,14 @@ def _build_stylesheet(p: _Palette) -> str:
     }}
 
     QPushButton[primary="true"] {{
-        background-color: {p.accent};
-        border: 1px solid {p.accent};
-        color: {p.accent_text};
+        background-color: {accent};
+        border: 1px solid {accent};
+        color: {accent_text};
         font-weight: 600;
     }}
 
     QPushButton[primary="true"]:hover {{
-        background-color: {p.accent};
+        background-color: {accent};
         border: 1px solid {p.text};
     }}
 
@@ -143,8 +163,8 @@ def _build_stylesheet(p: _Palette) -> str:
     }}
 
     QListWidget::item:selected {{
-        background-color: {p.accent};
-        color: {p.accent_text};
+        background-color: {accent};
+        color: {accent_text};
     }}
 
     QListWidget::item:hover:!selected {{
@@ -167,7 +187,7 @@ def _build_stylesheet(p: _Palette) -> str:
     QTabBar::tab:selected {{
         color: {p.text};
         font-weight: 600;
-        border-bottom: 2px solid {p.accent};
+        border-bottom: 2px solid {accent};
     }}
 
     QScrollArea {{
@@ -202,7 +222,7 @@ def _build_stylesheet(p: _Palette) -> str:
     }}
 
     QSlider::handle:horizontal {{
-        background: {p.accent};
+        background: {accent};
         width: 14px;
         height: 14px;
         margin: -5px 0;
@@ -210,15 +230,15 @@ def _build_stylesheet(p: _Palette) -> str:
     }}
 
     QSlider::sub-page:horizontal {{
-        background: {p.accent};
+        background: {accent};
         border-radius: 2px;
     }}
     """
 
 
-def apply_theme(app: QApplication, theme: str) -> None:
+def apply_theme(app: QApplication, theme: str, accent: str = DEFAULT_ACCENT) -> None:
     palette = _PALETTES.get(theme, _DARK)
-    app.setStyleSheet(_build_stylesheet(palette))
+    app.setStyleSheet(_build_stylesheet(palette, accent))
 
 
 def toggle_theme(theme: str) -> str:
