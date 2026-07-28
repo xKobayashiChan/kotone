@@ -31,6 +31,14 @@ from kotone.ui.widgets.image_loader import load_square_icon
 _AVATAR_SIZE = 40
 
 
+def is_agora_call(conference_call: RealmConferenceCall) -> bool:
+    """Agora経由で接続可能な通話かどうか。Yay!の通話にはAgora経由のものと、
+    agora_channel/agora_tokenが空で別サーバー(`server`フィールドに
+    'wss://...batiapps.com...'等が入る、プロトコル未解析)経由のものが
+    混在しており、後者はこのアプリでは非対応。"""
+    return bool(conference_call.agora_channel) and bool(conference_call.agora_token)
+
+
 class _ParticipantRow(QWidget):
     def __init__(self, user: RealmUser) -> None:
         super().__init__()

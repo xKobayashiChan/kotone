@@ -7,7 +7,14 @@ from typing import Optional
 
 import qasync
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from yaylib.models.call_type import CallType
 from yaylib.models.group import Group
@@ -16,7 +23,7 @@ from yaylib.models.posts_response import PostsResponse
 from yaylib.models.realm_conference_call import RealmConferenceCall
 
 from kotone.core.client_manager import ClientManager
-from kotone.ui.call.call_dialog import CallDialog
+from kotone.ui.call.call_dialog import CallDialog, is_agora_call
 from kotone.ui.widgets.image_loader import load_square_icon
 from kotone.ui.widgets.post_feed_list import PAGE_SIZE, PostFeedList
 
@@ -50,11 +57,8 @@ class GroupDetailView(QWidget):
         self._update_join_button_text()
         self._join_button.clicked.connect(self._on_join_leave_clicked)
 
-        # TODO(#1): VC(音声通話)機能は未完成のため無効化中。実装を完了させたら有効化する。
         self._vc_button = QPushButton("VC")
         self._vc_button.clicked.connect(self._on_vc_clicked)
-        self._vc_button.setEnabled(False)
-        self._vc_button.setToolTip("通話機能は開発中のため利用できません")
 
         header_text_col = QVBoxLayout()
         header_text_col.addWidget(title_label)
@@ -107,20 +111,41 @@ class GroupDetailView(QWidget):
         try:
             conference_call = await self._find_active_conference_call(client)
             if conference_call is None:
+                # create_conference_call_postはx_jwtではなくsigned_info+
+                # timestampでの署名を要求する(付けないと400 Invalid signed
+                # info)。サーバー側がこのハッシュを検証するには、ハッシュに
+                # 使ったapi_key/uuid(device_uuid)自体もリクエストに含めて
+                # おく必要がある(どちらか片方でも欠けると同じエラーになる)。
+                signed = await client.generate_signed_info()
                 response = await client.create_conference_call_post(
                     group_id=self._group.id,
-                    call_type=CallType.VOICE.value,
+                    # "voice"はサーバーに拒否される(400 call_type does not
+                    # have a valid value)。実際に稼働中の通話をAPIで確認した
+                    # ところcall_type="vdo"だったため、音声のみの通話でも
+                    # こちらを使う。
+                    call_type=CallType.VDO.value,
                     joinable_by=JoinableBy.ANYONE.value,
+                    timestamp=signed.timestamp,
+                    signed_info=signed.value,
+                    api_key=client.api_key,
+                    uuid=client.device_uuid,
                 )
                 conference_call = response.conference_call
             if conference_call is not None:
-                dialog = CallDialog(
-                    conference_call,
-                    self._group.topic or "(無題)",
-                    self._client_manager,
-                    parent=self,
-                )
-                dialog.show()
+                if not is_agora_call(conference_call):
+                    QMessageBox.warning(
+                        self,
+                        "通話",
+                        "この通話はAgora以外の方式(未対応)のため、このアプリからは参加できません。",
+                    )
+                else:
+                    dialog = CallDialog(
+                        conference_call,
+                        self._group.topic or "(無題)",
+                        self._client_manager,
+                        parent=self,
+                    )
+                    dialog.show()
         except Exception:  # noqa: BLE001
             pass
         finally:
