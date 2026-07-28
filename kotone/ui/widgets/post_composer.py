@@ -22,7 +22,7 @@ from yaylib.models.joinable_by import JoinableBy
 from yaylib.models.post import Post
 
 from kotone.core.client_manager import ClientManager
-from kotone.ui.call.call_dialog import CallDialog
+from kotone.ui.call.call_dialog import CallDialog, is_agora_call
 from kotone.ui.widgets.media_picker import MediaPicker
 
 _ATTACHMENT_KWARGS = [
@@ -52,11 +52,8 @@ class PostComposer(QWidget):
         self._media_picker = MediaPicker()
 
         self._status_label = QLabel("")
-        # TODO(#1): VC(音声通話)機能は未完成のため無効化中。実装を完了させたら有効化する。
         self._call_button = QPushButton("\U0001F4DE 通話を始める")
         self._call_button.clicked.connect(self._on_call_clicked)
-        self._call_button.setEnabled(False)
-        self._call_button.setToolTip("通話機能は開発中のため利用できません")
         self._submit_button = QPushButton("投稿する")
         self._submit_button.setProperty("primary", True)
         self._submit_button.clicked.connect(self._on_submit_clicked)
@@ -132,10 +129,23 @@ class PostComposer(QWidget):
         self._call_button.setEnabled(False)
         self._status_label.setText("通話を開始しています...")
         try:
+            # create_conference_call_postはx_jwtではなくsigned_info+
+            # timestampでの署名を要求する(付けないと400 Invalid signed
+            # info)。サーバー側がこのハッシュを検証するには、ハッシュに
+            # 使ったapi_key/uuid(device_uuid)自体もリクエストに含めて
+            # おく必要がある(どちらか片方でも欠けると同じエラーになる)。
+            signed = await client.generate_signed_info()
             response = await client.create_conference_call_post(
-                call_type=CallType.VOICE.value,
+                # "voice"はサーバーに拒否される(400 call_type does not have
+                # a valid value)。実際に稼働中の通話をAPIで確認したところ
+                # call_type="vdo"だったため、音声のみの通話でもこちらを使う。
+                call_type=CallType.VDO.value,
                 joinable_by=JoinableBy.ANYONE.value,
                 text=self._text_edit.toPlainText().strip() or None,
+                timestamp=signed.timestamp,
+                signed_info=signed.value,
+                api_key=client.api_key,
+                uuid=client.device_uuid,
             )
         except Exception as err:  # noqa: BLE001
             self._status_label.setText(f"通話の開始に失敗しました: {err}")
@@ -143,13 +153,18 @@ class PostComposer(QWidget):
         finally:
             self._call_button.setEnabled(True)
 
-        self._status_label.setText("")
         self._text_edit.clear()
         if response.post is not None:
             self.post_created.emit(response.post)
         if response.conference_call is not None:
-            dialog = CallDialog(response.conference_call, "通話", self._client_manager, parent=self)
-            dialog.show()
+            if not is_agora_call(response.conference_call):
+                self._status_label.setText(
+                    "この通話はAgora以外の方式(未対応)のため、このアプリからは参加できません。"
+                )
+            else:
+                self._status_label.setText("")
+                dialog = CallDialog(response.conference_call, "通話", self._client_manager, parent=self)
+                dialog.show()
 
     def _set_busy(self, busy: bool) -> None:
         self._submit_button.setEnabled(not busy)

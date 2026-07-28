@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSlider,
     QVBoxLayout,
@@ -33,7 +34,7 @@ from yaylib.models.post import Post
 from yaylib.models.realm_conference_call import RealmConferenceCall
 
 from kotone.core.client_manager import ClientManager
-from kotone.ui.call.call_dialog import CallDialog
+from kotone.ui.call.call_dialog import CallDialog, is_agora_call
 from kotone.ui.widgets.clickable_label import ClickableLabel
 from kotone.ui.widgets.image_loader import load_pixmap, load_square_icon
 from kotone.ui.widgets.user_profile_opener import open_user_profile
@@ -156,11 +157,8 @@ class PostCard(QFrame):
         text_col.addWidget(QLabel(status_text))
         row.addLayout(text_col, 1)
 
-        # TODO(#1): VC(音声通話)機能は未完成のため無効化中。実装を完了させたら有効化する。
         join_button = QPushButton("参加する")
         join_button.setProperty("primary", True)
-        join_button.setEnabled(False)
-        join_button.setToolTip("通話機能は開発中のため利用できません")
         join_button.clicked.connect(lambda: self._on_join_call_clicked(call))
         row.addWidget(join_button)
 
@@ -178,6 +176,13 @@ class PostCard(QFrame):
             return
         logger.debug("get_conference_call response: %r", response.model_dump())
         if response.conference_call is None:
+            return
+        if not is_agora_call(response.conference_call):
+            QMessageBox.warning(
+                self,
+                "通話",
+                "この通話はAgora以外の方式(未対応)のため、このアプリからは参加できません。",
+            )
             return
         group_name = self._post.group.topic if self._post.group else "通話"
         dialog = CallDialog(response.conference_call, group_name, self._client_manager, parent=self)

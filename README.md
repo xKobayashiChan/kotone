@@ -25,11 +25,18 @@ pip install -e .
 
 ## 環境変数
 
-VC（音声通話）機能は現状未完成のため、UI上のボタンは無効化されています（TODO）。
+VC（音声通話）機能を使うには `KOTONE_AGORA_APP_ID` の設定が必要です。
 
 `.env.example` を `.env` にコピーして値を設定し、シェル起動時に読み込む運用でも構いません（`.env` 自体はコミット対象外）。
 
 値の由来は `kotone/core/agora_config.py` のコメントを参照してください。
+
+### VCの既知の制限
+
+Yay!の通話にはAgora経由のものと、agora_channel/agora_tokenが空で別サーバー
+（プロトコル未解析）経由のものが混在しています。後者の通話に「参加する」
+「VC」ボタンを押すと、参加を試みる代わりにエラーメッセージが表示されます
+（`kotone/ui/call/call_dialog.py`の`is_agora_call`で判定）。
 
 ## 起動方法（動作確認）
 
