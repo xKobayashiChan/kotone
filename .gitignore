@@ -22,7 +22,8 @@ dist/
 *.iml
 
 # Claude Code local (machine-specific, not shared)
-.claude/settings.local.json
+.claude/
+CLAUDE.md
 
 # MCP local config (points at this machine's local IDE server)
 .mcp.json

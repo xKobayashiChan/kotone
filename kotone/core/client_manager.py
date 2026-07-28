@@ -20,6 +20,17 @@ from yaylib.session_file import new_session_store
 
 logger = logging.getLogger(__name__)
 
+# yaylib自体はデフォルトだと完全に無音（NullHandler+propagate無効）な
+# ライブラリ仕様のため、明示的にloggerを渡さない限りAPIリクエストの
+# 形跡は一切ログに残らない。ここで渡すことで、送信したHTTPリクエスト
+# （メソッド・パス・リトライ・トークン再発行等）がkotone.logに記録される
+# ようになる。yaylib側はこれをDEBUGレベルで出すが、KOTONE_LOG_LEVEL全体を
+# DEBUGにするとasyncio/qasyncの内部ログまで大量に出てノイズになるため、
+# このロガーだけ明示的にDEBUGへ固定し、アプリ全体のログレベルに関係なく
+# API呼び出しの記録だけは常に残るようにしている。
+_api_logger = logging.getLogger("kotone.api")
+_api_logger.setLevel(logging.DEBUG)
+
 
 def _session_file_path() -> str:
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
@@ -39,7 +50,7 @@ class ClientManager:
     async def _ensure_client(self) -> yaylib.Client:
         if self.client is None:
             store = await new_session_store(_session_file_path())
-            self.client = yaylib.Client(session_store=store)
+            self.client = yaylib.Client(session_store=store, logger=_api_logger)
         return self.client
 
     def require_client(self) -> yaylib.Client:
