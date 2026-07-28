@@ -9,14 +9,16 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import qasync
 import yaylib
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -34,11 +36,37 @@ from yaylib.models.realm_message import RealmMessage
 from kotone.core.client_manager import ClientManager
 from kotone.ui.widgets.chat_room_row import room_display_name
 from kotone.ui.widgets.clickable_label import ClickableLabel
-from kotone.ui.widgets.image_loader import load_pixmap
+from kotone.ui.widgets.image_loader import load_pixmap, load_square_icon
 from kotone.ui.widgets.user_profile_opener import open_user_profile
 
 _MESSAGE_PAGE_SIZE = 50
 _MEDIA_MAX_WIDTH = 320
+_AVATAR_SIZE = 32
+_BUBBLE_MAX_WIDTH = 420
+_TIME_LABEL_COLOR = "#8a8a8f"
+_WEEKDAY_JP_LABELS = ("月", "火", "水", "木", "金", "土", "日")
+
+
+def _message_date(msg: RealmMessage) -> Optional[date]:
+    if not msg.created_at:
+        return None
+    try:
+        return datetime.fromtimestamp(msg.created_at).date()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _format_date_separator(value: date) -> str:
+    return f"{value.month}/{value.day} - {_WEEKDAY_JP_LABELS[value.weekday()]}曜日"
+
+
+def _format_message_time(msg: RealmMessage) -> str:
+    if not msg.created_at:
+        return ""
+    try:
+        return datetime.fromtimestamp(msg.created_at).strftime("%H:%M")
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 class ChatRoomView(QWidget):
@@ -63,6 +91,14 @@ class ChatRoomView(QWidget):
         self._pending_image: Optional[Path] = None
         self._stream = None
         self._sub = None
+
+        # 日付区切りの管理用。_bottom_date/_top_dateは現在表示中の一番下/
+        # 一番上のメッセージの日付、_top_separator_widgetは一番上に表示中の
+        # 区切りウィジェット（「さらに読み込む」で過去メッセージを継ぎ足す
+        # 際、境界が変わったら差し替える）。
+        self._bottom_date: Optional[date] = None
+        self._top_date: Optional[date] = None
+        self._top_separator_widget: Optional[QWidget] = None
 
         back_button = QPushButton("← 一覧に戻る")
         back_button.clicked.connect(self.back_requested.emit)
@@ -128,7 +164,7 @@ class ChatRoomView(QWidget):
         raw_messages = response.messages or []
         messages = list(reversed(raw_messages))  # 古い→新しい順に並べ直す
         for msg in messages:
-            self._append_message(msg, at_top=False)
+            self._append_message(msg)
         if messages:
             self._oldest_message_id = messages[0].id
         self._load_more_button.setVisible(len(raw_messages) >= _MESSAGE_PAGE_SIZE)
@@ -149,8 +185,7 @@ class ChatRoomView(QWidget):
 
         raw_messages = response.messages or []
         messages = list(reversed(raw_messages))
-        for msg in messages:
-            self._append_message(msg, at_top=True)
+        self._prepend_older_messages(messages)
         if messages:
             self._oldest_message_id = messages[0].id
         self._load_more_button.setVisible(len(raw_messages) >= _MESSAGE_PAGE_SIZE)
@@ -170,7 +205,7 @@ class ChatRoomView(QWidget):
             return
         if msg is None:
             return
-        self._append_message(msg, at_top=False)
+        self._append_message(msg)
         self._scroll_to_bottom()
 
     async def shutdown(self) -> None:
@@ -179,32 +214,113 @@ class ChatRoomView(QWidget):
         if self._stream is not None:
             await self._stream.close()
 
-    def _append_message(self, msg: RealmMessage, at_top: bool) -> None:
+    def _append_message(self, msg: RealmMessage) -> None:
+        """新しいメッセージを一番下に追加する（初回読み込み・新着イベント・
+        自メッセージの楽観的表示で使う）。日付が変わっていれば区切りも
+        ここで挿入する。"""
         if msg.id is not None:
             if msg.id in self._seen_message_ids:
                 return
             self._seen_message_ids.add(msg.id)
+
+        msg_date = _message_date(msg)
+        is_first_ever = self._top_date is None
+        stretch_index = self._messages_layout.count() - 1
+        if msg_date is not None and msg_date != self._bottom_date:
+            separator = self._build_date_separator(msg_date)
+            self._messages_layout.insertWidget(stretch_index, separator)
+            stretch_index += 1
+            self._bottom_date = msg_date
+            if is_first_ever:
+                self._top_date = msg_date
+                self._top_separator_widget = separator
+
         widget = self._build_message_widget(msg)
-        if at_top:
-            self._messages_layout.insertWidget(1, widget)  # index0は「さらに読み込む」
-        else:
-            stretch_index = self._messages_layout.count() - 1
-            self._messages_layout.insertWidget(stretch_index, widget)
+        self._messages_layout.insertWidget(stretch_index, widget)
+
+    def _prepend_older_messages(self, messages: List[RealmMessage]) -> None:
+        """「さらに読み込む」で取得した過去メッセージ群を一番上にまとめて
+        追加する。1件ずつ同じ位置(index1)に挿し込むと逆順になってしまう
+        ため、増加していくインデックスを使ってまとめて挿入する。"""
+        fresh: List[RealmMessage] = []
+        for msg in messages:
+            if msg.id is not None:
+                if msg.id in self._seen_message_ids:
+                    continue
+                self._seen_message_ids.add(msg.id)
+            fresh.append(msg)
+        if not fresh:
+            return
+
+        # 追加分の末尾（一番新しい過去メッセージ）が既存の一番上のメッセージ
+        # と同じ日付なら、既存側にあった区切りはもう境界ではなくなるため
+        # 消す（新しい境界はこのあと追加分の先頭に付け直す）。
+        last_new_date = _message_date(fresh[-1])
+        if (
+            self._top_separator_widget is not None
+            and last_new_date is not None
+            and last_new_date == self._top_date
+        ):
+            self._messages_layout.removeWidget(self._top_separator_widget)
+            self._top_separator_widget.deleteLater()
+            self._top_separator_widget = None
+
+        insert_index = 1  # index0は「さらに読み込む」ボタン
+        prev_date: Optional[date] = None
+        new_top_separator: Optional[QWidget] = None
+        for msg in fresh:
+            msg_date = _message_date(msg)
+            if msg_date is not None and msg_date != prev_date:
+                separator = self._build_date_separator(msg_date)
+                self._messages_layout.insertWidget(insert_index, separator)
+                insert_index += 1
+                prev_date = msg_date
+                if new_top_separator is None:
+                    new_top_separator = separator
+            widget = self._build_message_widget(msg)
+            self._messages_layout.insertWidget(insert_index, widget)
+            insert_index += 1
+
+        if new_top_separator is not None:
+            self._top_separator_widget = new_top_separator
+        first_date = _message_date(fresh[0])
+        if first_date is not None:
+            self._top_date = first_date
+
+    def _build_date_separator(self, value: date) -> QWidget:
+        label = QLabel(_format_date_separator(value))
+
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Shape.StyledPanel)
+        frame_layout = QHBoxLayout(frame)
+        frame_layout.setContentsMargins(12, 4, 12, 4)
+        frame_layout.addWidget(label)
+
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 8, 0, 8)
+        row_layout.addStretch(1)
+        row_layout.addWidget(frame)
+        row_layout.addStretch(1)
+        return row
 
     def _build_message_widget(self, msg: RealmMessage) -> QWidget:
         sender = self._members_by_id.get(msg.user_id)
-        if msg.user_id == self._own_user_id:
+        is_own = msg.user_id == self._own_user_id
+        if is_own:
             nickname = "自分"
         elif sender is not None and sender.nickname:
             nickname = sender.nickname
         else:
             nickname = "?"
 
-        container = QWidget()
-        col = QVBoxLayout(container)
+        bubble = QWidget()
+        bubble.setMaximumWidth(_BUBBLE_MAX_WIDTH)
+        col = QVBoxLayout(bubble)
+        col.setContentsMargins(0, 0, 0, 0)
         header = ClickableLabel(f"<b>{nickname}</b>")
         header.setTextFormat(Qt.TextFormat.RichText)
-        if msg.user_id != self._own_user_id and msg.user_id is not None:
+        if not is_own and msg.user_id is not None:
             header.clicked.connect(
                 lambda uid=msg.user_id: open_user_profile(self._client_manager, uid)
             )
@@ -223,7 +339,37 @@ class ChatRoomView(QWidget):
             )
             col.addWidget(image_label)
 
-        return container
+        time_label = QLabel(_format_message_time(msg))
+        time_label.setStyleSheet(f"color: {_TIME_LABEL_COLOR}; font-size: 11px;")
+
+        # 相手のメッセージはアイコン付きで左寄せ、自分のメッセージは右寄せに
+        # 表示し、誰の発言か一目で分かるようにする。時刻はバブルの内側
+        # （画面中央寄りの辺）に添える。
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        if is_own:
+            row_layout.addStretch(1)
+            row_layout.addWidget(time_label, 0, Qt.AlignmentFlag.AlignBottom)
+            row_layout.addWidget(bubble)
+        else:
+            avatar_label = ClickableLabel()
+            avatar_label.setFixedSize(_AVATAR_SIZE, _AVATAR_SIZE)
+            icon_url = None
+            if sender is not None:
+                icon_url = sender.profile_icon_thumbnail or sender.profile_icon
+            if icon_url:
+                load_square_icon(icon_url, _AVATAR_SIZE, avatar_label)
+            if msg.user_id is not None:
+                avatar_label.clicked.connect(
+                    lambda uid=msg.user_id: open_user_profile(self._client_manager, uid)
+                )
+            row_layout.addWidget(avatar_label, 0, Qt.AlignmentFlag.AlignTop)
+            row_layout.addWidget(bubble)
+            row_layout.addWidget(time_label, 0, Qt.AlignmentFlag.AlignBottom)
+            row_layout.addStretch(1)
+
+        return row
 
     def _set_scaled_pixmap(self, label: QLabel, pixmap) -> None:
         scaled = pixmap.scaledToWidth(
@@ -294,6 +440,7 @@ class ChatRoomView(QWidget):
                 user_id=self._own_user_id,
                 message_type=yaylib.MessageType.TEXT,
                 room_id=self._room.id,
+                created_at=int(datetime.now().timestamp()),
             )
-            self._append_message(echo, at_top=False)
+            self._append_message(echo)
             self._scroll_to_bottom()

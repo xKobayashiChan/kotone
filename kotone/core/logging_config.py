@@ -13,6 +13,35 @@ from logging.handlers import RotatingFileHandler
 _MAX_BYTES = 1_000_000
 _BACKUP_COUNT = 3
 
+# yaylib(kotone.core.client_manager経由でlogger=を渡している)がAPI
+# リクエストのトレースをextra={...}付きで出す際のキー。標準の
+# logging.Formatterはextraを%(message)sに含めてくれないため、ここで
+# 拾って行末に付け足す。
+_TRACE_EXTRA_FIELDS = (
+    "event",
+    "method",
+    "path",
+    "host",
+    "status",
+    "attempt",
+    "delay_ms",
+    "outcome",
+    "op",
+)
+
+
+class _TraceAwareFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        base = super().format(record)
+        extras = [
+            f"{key}={getattr(record, key)!r}"
+            for key in _TRACE_EXTRA_FIELDS
+            if hasattr(record, key)
+        ]
+        if not extras:
+            return base
+        return f"{base} ({', '.join(extras)})"
+
 
 def _log_dir() -> str:
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
@@ -27,7 +56,7 @@ def setup_logging() -> None:
     level_name = os.environ.get("KOTONE_LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
 
-    formatter = logging.Formatter(
+    formatter = _TraceAwareFormatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     )
 
