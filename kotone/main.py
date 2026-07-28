@@ -33,13 +33,15 @@ from kotone.core.resources import resource_dir
 from kotone.core.settings import AppSettings
 from kotone.ui.login_window import LoginWindow
 from kotone.ui.main_window import MainWindow
-from kotone.ui.theme import DEFAULT_THEME, apply_theme, toggle_theme
+from kotone.ui.theme import DEFAULT_ACCENT, DEFAULT_THEME, apply_theme, toggle_theme
 from kotone.ui.views.chat_view import ChatView
 from kotone.ui.views.footprints_view import FootprintsView
 from kotone.ui.views.groups_view import GroupsView
 from kotone.ui.views.notifications_view import NotificationsView
 from kotone.ui.views.profile_view import ProfileView
+from kotone.ui.views.settings_dialog import SettingsDialog
 from kotone.ui.views.timeline_view import TimelineView
+from kotone.ui.widgets.busy_dialog import BusyDialog
 
 _ICON_PATH = resource_dir() / "kotone.ico"
 
@@ -55,12 +57,40 @@ class _AppController:
         self._tray_icon: QSystemTrayIcon | None = None
         self._notification_poller: NotificationPoller | None = None
         self._theme = self._settings.theme() or DEFAULT_THEME
-        apply_theme(QApplication.instance(), self._theme)
+        self._accent = self._settings.accent_color() or DEFAULT_ACCENT
+        self._settings_dialog: SettingsDialog | None = None
+        apply_theme(QApplication.instance(), self._theme, self._accent)
 
     def _on_theme_toggle_requested(self) -> None:
         self._theme = toggle_theme(self._theme)
         self._settings.set_theme(self._theme)
-        apply_theme(QApplication.instance(), self._theme)
+        self._apply_theme_with_busy_indicator()
+
+    def _on_settings_requested(self) -> None:
+        if self._settings_dialog is not None:
+            self._settings_dialog.raise_()
+            self._settings_dialog.activateWindow()
+            return
+        dialog = SettingsDialog(self._settings, parent=self._main_window)
+        dialog.accent_changed.connect(self._on_accent_changed)
+        dialog.finished.connect(self._on_settings_dialog_finished)
+        self._settings_dialog = dialog
+        dialog.show()
+
+    def _on_settings_dialog_finished(self) -> None:
+        self._settings_dialog = None
+
+    def _on_accent_changed(self, accent: str) -> None:
+        self._accent = accent
+        self._apply_theme_with_busy_indicator()
+
+    def _apply_theme_with_busy_indicator(self) -> None:
+        # 全ウィジェットへのスタイルシート再適用は、投稿一覧等ウィジェット数が
+        # 多い画面では体感できるほど時間がかかるため、その間だけ簡易的な
+        # ローディング表示を出す。
+        parent = self._settings_dialog or self._main_window
+        dialog = BusyDialog("テーマを適用中...", parent=parent)
+        dialog.run(lambda: apply_theme(QApplication.instance(), self._theme, self._accent))
 
     async def start(self) -> None:
         last_email = self._settings.last_email()
@@ -89,6 +119,7 @@ class _AppController:
             lambda: asyncio.ensure_future(self._on_logout_requested(result.email))
         )
         window.theme_toggle_requested.connect(self._on_theme_toggle_requested)
+        window.settings_requested.connect(self._on_settings_requested)
         window.set_page("timeline", TimelineView(self._client_manager))
         window.set_page("chat", ChatView(self._client_manager))
         window.set_page("groups", GroupsView(self._client_manager))
@@ -106,7 +137,9 @@ class _AppController:
             tray_icon.setToolTip("Kotone")
             tray_icon.show()
             self._tray_icon = tray_icon
-            self._notification_poller = NotificationPoller(self._client_manager, tray_icon)
+            self._notification_poller = NotificationPoller(
+                self._client_manager, tray_icon, self._settings
+            )
             self._notification_poller.start()
 
     async def _stop_notification_poller(self) -> None:

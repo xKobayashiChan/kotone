@@ -7,6 +7,7 @@ get_conversation、投稿はcreate_post(in_reply_to=...)で行う。
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Optional
@@ -378,7 +379,12 @@ class PostCard(QFrame):
         comment_edit.setPlaceholderText("コメントを入力")
         send_button = QPushButton("送信")
 
-        @qasync.asyncSlot()
+        # qasync.asyncSlot()はシグナルの引数個数から実際の関数シグネチャに
+        # 合わせて末尾の引数を取り除きながら呼び出そうとするが、_sendの
+        # ように引数を1つも取らない関数だとその調整ロジックが0個の状態を
+        # 試さずに諦めてしまい、クリック(bool付き)・Enter(引数無し)の
+        # どちらから呼んでも失敗する。そのためここではasyncSlot()を使わず、
+        # 素のasyncio.ensure_futureで直接スケジュールする。
         async def _send() -> None:
             text = comment_edit.text().strip()
             if not text or self._post.id is None:
@@ -405,8 +411,11 @@ class PostCard(QFrame):
             self._comments_count += 1
             self._update_comment_button_text()
 
-        comment_edit.returnPressed.connect(_send)
-        send_button.clicked.connect(_send)
+        def _on_send_triggered(*_args) -> None:
+            asyncio.ensure_future(_send())
+
+        comment_edit.returnPressed.connect(_on_send_triggered)
+        send_button.clicked.connect(_on_send_triggered)
 
         row = QHBoxLayout()
         row.addWidget(comment_edit, 1)

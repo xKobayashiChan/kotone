@@ -43,6 +43,7 @@ def _placeholder(text: str) -> QWidget:
 class MainWindow(QMainWindow):
     logout_requested = Signal()
     theme_toggle_requested = Signal()
+    settings_requested = Signal()
 
     def __init__(self, client_manager: ClientManager, login_result: LoginResult) -> None:
         super().__init__()
@@ -75,6 +76,8 @@ class MainWindow(QMainWindow):
         account_label = QLabel(f"ログイン中: {login_result.email} (user_id={login_result.user_id})")
         theme_button = QPushButton("🌓 テーマ切替")
         theme_button.clicked.connect(self.theme_toggle_requested.emit)
+        settings_button = QPushButton("⚙ 設定")
+        settings_button.clicked.connect(self.settings_requested.emit)
         logout_button = QPushButton("ログアウト")
         logout_button.clicked.connect(self.logout_requested.emit)
 
@@ -82,6 +85,7 @@ class MainWindow(QMainWindow):
         sidebar.addWidget(self._nav_list, 1)
         sidebar.addWidget(account_label)
         sidebar.addWidget(theme_button)
+        sidebar.addWidget(settings_button)
         sidebar.addWidget(logout_button)
 
         sidebar_container = QWidget()
